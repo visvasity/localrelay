@@ -30,10 +30,7 @@ func (c *RunCmd) Purpose() string {
 func (c *RunCmd) Command() (string, *flag.FlagSet, cli.CmdFunc) {
 	fset := new(flag.FlagSet)
 	c.RunFlags.SetFlags(fset, &c.RunFlags)
-	c.Options.SetFlags(fset, &servers.Options{
-		HTTPPort:  1080,
-		HTTPSPort: 1443,
-	})
+	c.Options.SetFlags(fset, nil)
 	fset.StringVar(&c.dataDir, "data-dir", "", "Path to the data directory")
 	return "run", fset, c.RunFlags.WithRunFunc(c.run)
 }
@@ -51,16 +48,29 @@ func (c *RunCmd) run(ctx context.Context, args []string) error {
 	}
 	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, nil)))
 
-	user, err := servers.New(c.dataDir, &c.Options)
+	// server is the common lifecycle shared by the per-user and system daemons.
+	type server interface {
+		Start(context.Context) error
+		Stop() error
+		Close() error
+	}
+	var srv server
+
+	var err error
+	if c.System {
+		srv, err = servers.NewSystem(c.dataDir, &c.Options)
+	} else {
+		srv, err = servers.New(c.dataDir, &c.Options)
+	}
 	if err != nil {
 		return err
 	}
-	defer user.Close()
+	defer srv.Close()
 
-	if err := user.Start(ctx); err != nil {
+	if err := srv.Start(ctx); err != nil {
 		return err
 	}
-	defer user.Stop()
+	defer srv.Stop()
 
 	// Signal successful initialization to the foreground/monitor process.
 	runcmd.Report(ctx, nil)
