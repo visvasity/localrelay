@@ -15,6 +15,7 @@ import (
 func main() {
 	caCmds := []cli.Command{
 		new(subcmds.CAInitCmd),
+		new(subcmds.CACertCmd),
 		new(subcmds.CAInstallCmd),
 		new(subcmds.CAUninstallCmd),
 	}
