@@ -34,6 +34,19 @@ func (c *Serve) Command() (string, *flag.FlagSet, cli.CmdFunc) {
 	return "run", fset, c.run
 }
 
+func (c *Serve) Check(ctx context.Context) error {
+	c.dataDir = servers.ResolveDataDir(c.dataDir)
+	if err := c.Options.Check(ctx); err != nil {
+		return err
+	}
+	return nil
+}
+
+// LocksDir method will cause runcmd to create daemonizing lock files in this directory.
+func (c *Serve) LocksDir() string {
+	return c.dataDir
+}
+
 func (c *Serve) run(ctx context.Context, args []string) error {
 	logsDir := filepath.Join(c.dataDir, "logs")
 	if os.Getuid() == 0 {
@@ -55,7 +68,7 @@ func (c *Serve) run(ctx context.Context, args []string) error {
 	}
 	var srv server
 
-	srv, err = servers.New(servers.ResolveDataDir(c.dataDir), &c.Options)
+	srv, err = servers.New(c.dataDir, &c.Options)
 	if err != nil {
 		return err
 	}

@@ -4,7 +4,7 @@ package main
 
 import (
 	"context"
-	"log"
+	"log/slog"
 	"os"
 
 	"github.com/visvasity/cli"
@@ -24,6 +24,7 @@ func main() {
 		cli.NewGroup("ca", "Certificate authority operations", caCmds...),
 	}
 	if err := cli.Run(context.Background(), cmds, os.Args[1:]); err != nil {
-		log.Fatal(err)
+		slog.Error("failed", "err", err)
+		os.Exit(1)
 	}
 }

@@ -83,6 +83,7 @@ func ResolveDataDir(dir string) string {
 }
 
 func (v *Options) Check(context.Context) error {
+	v.setDefaults()
 	if len(v.SocketsDir) == 0 {
 		return fmt.Errorf("sockets directory (-sockets-dir) path cannot be empty")
 	}

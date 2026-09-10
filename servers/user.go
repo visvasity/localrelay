@@ -40,7 +40,7 @@ type User struct {
 	targetMap syncmap.Map[string, http.Handler]
 }
 
-func New(dataDir string, opts *Options) (_ *User, err error) {
+func NewUser(dataDir string, opts *Options) (_ *User, err error) {
 	if opts == nil {
 		opts = new(Options)
 	}
