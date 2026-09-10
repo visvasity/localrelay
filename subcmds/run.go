@@ -56,12 +56,7 @@ func (c *RunCmd) run(ctx context.Context, args []string) error {
 	}
 	var srv server
 
-	var err error
-	if c.System {
-		srv, err = servers.NewSystem(c.dataDir, &c.Options)
-	} else {
-		srv, err = servers.New(c.dataDir, &c.Options)
-	}
+	srv, err := servers.New(c.dataDir, &c.Options)
 	if err != nil {
 		return err
 	}
