@@ -21,6 +21,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -68,6 +69,10 @@ type Relay struct {
 	rproxy       *httphelp.Server
 	targetMap    syncmap.Map[string, http.Handler]
 	userProxyMap syncmap.Map[string, http.Handler]
+
+	// alive holds the latest per-target liveness (target -> up), refreshed by the
+	// background health checker and read when building list entries.
+	alive atomic.Pointer[map[string]bool]
 }
 
 func New(dataDir string, opts *Options) (_ *Relay, err error) {
@@ -391,6 +396,19 @@ func (r *Relay) listEntries() []ListEntry {
 		}
 		return entries[i].Kind < entries[j].Kind
 	})
+	alive := r.alive.Load()
+	for i := range entries {
+		entries[i].Status = StatusUnknown
+		if alive != nil {
+			if up, ok := (*alive)[entries[i].Target]; ok {
+				if up {
+					entries[i].Status = StatusUp
+				} else {
+					entries[i].Status = StatusDown
+				}
+			}
+		}
+	}
 	return entries
 }
 
@@ -419,6 +437,90 @@ func (r *Relay) socketEntries() []ListEntry {
 		entries = append(entries, ListEntry{Name: name, Target: path, Kind: KindSocket})
 	}
 	return entries
+}
+
+// Health-check cadence and per-target connect timeout.
+const (
+	healthCheckInterval = 15 * time.Second
+	healthCheckTimeout  = 2 * time.Second
+)
+
+// startHealthChecks runs periodic liveness probes of all relay targets until the
+// daemon is closed, refreshing the status shown on the welcome page and list.
+func (r *Relay) startHealthChecks() {
+	r.wg.Add(1)
+	go func() {
+		defer r.wg.Done()
+
+		r.checkHealth()
+		t := time.NewTicker(healthCheckInterval)
+		defer t.Stop()
+		for {
+			select {
+			case <-r.lifeCtx.Done():
+				return
+			case <-t.C:
+				r.checkHealth()
+			}
+		}
+	}()
+}
+
+// checkHealth probes every unique target once (concurrently) with a short connect
+// timeout and stores the results for listEntries to report.
+func (r *Relay) checkHealth() {
+	// Collect unique targets and how to dial each.
+	type dial struct{ network, address string }
+	targets := make(map[string]dial)
+	for _, e := range r.listEntries() {
+		if _, seen := targets[e.Target]; seen {
+			continue
+		}
+		if network, address, ok := entryDial(e); ok {
+			targets[e.Target] = dial{network, address}
+		} else {
+			targets[e.Target] = dial{} // unresolvable -> down
+		}
+	}
+
+	status := make(map[string]bool, len(targets))
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+	for target, d := range targets {
+		wg.Add(1)
+		go func(target string, d dial) {
+			defer wg.Done()
+			alive := false
+			if d.network != "" {
+				if conn, err := net.DialTimeout(d.network, d.address, healthCheckTimeout); err == nil {
+					conn.Close()
+					alive = true
+				}
+			}
+			mu.Lock()
+			status[target] = alive
+			mu.Unlock()
+		}(target, d)
+	}
+	wg.Wait()
+	r.alive.Store(&status)
+}
+
+// entryDial returns the network and address to connect to for a liveness probe of
+// a list entry.
+func entryDial(e ListEntry) (network, address string, ok bool) {
+	switch e.Kind {
+	case KindRelay:
+		network, address, _, err := relayDial(e.Target)
+		if err != nil {
+			return "", "", false
+		}
+		return network, address, true
+	case KindUser, KindSocket:
+		return "unix", e.Target, true
+	default:
+		return "", "", false
+	}
 }
 
 // checkSocketOwner verifies socketPath is a Unix socket owned by username. A
@@ -590,6 +692,7 @@ func (r *Relay) Start(ctx context.Context) (status error) {
 	r.controlServer = sc
 	r.forwardServer = sf
 
+	r.startHealthChecks()
 	return nil
 }
 
@@ -676,6 +779,8 @@ func (r *Relay) startControlLocked(ctx context.Context) (*http.Server, error) {
 
 	mux := http.NewServeMux()
 	mux.Handle(AddPath, httphelp.PostHandler(r.handleAdd))
+	mux.Handle(RemovePath, httphelp.PostHandler(r.handleRemove))
+	mux.Handle(ListPath, httphelp.PostHandler(r.handleList))
 	server := &http.Server{
 		Handler:     mux,
 		BaseContext: func(net.Listener) context.Context { return r.lifeCtx },
@@ -772,6 +877,11 @@ func (r *Relay) handleRequest(w http.ResponseWriter, req *http.Request) error {
 		host = h
 	}
 	host = strings.ToLower(host)
+	// The apex localhost host serves a welcome page listing the relays instead of
+	// routing to a backend.
+	if host == "localhost" {
+		return r.serveWelcome(w, req)
+	}
 	if !strings.HasSuffix(host, ".localhost") {
 		return os.ErrNotExist
 	}
