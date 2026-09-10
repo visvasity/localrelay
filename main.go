@@ -19,9 +19,15 @@ func main() {
 			LocksDir: filepath.Join(os.Getenv("HOME"), ".localrelay"),
 		},
 	}
+	caCmds := []cli.Command{
+		new(subcmds.CAInitCmd),
+		new(subcmds.CAInstallCmd),
+		new(subcmds.CAUninstallCmd),
+	}
 
 	cmds := []cli.Command{
 		runCmd,
+		cli.NewGroup("ca", "Certificate authority operations", caCmds...),
 	}
 	if err := cli.Run(context.Background(), cmds, os.Args[1:]); err != nil {
 		log.Fatal(err)
