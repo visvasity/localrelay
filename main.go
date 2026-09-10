@@ -22,6 +22,8 @@ func main() {
 	cmds := []cli.Command{
 		runcmd.Wrap(new(subcmds.Serve)),
 		new(subcmds.AddCmd),
+		new(subcmds.RemoveCmd),
+		new(subcmds.ListCmd),
 		cli.NewGroup("ca", "Certificate authority operations", caCmds...),
 	}
 	if err := cli.Run(context.Background(), cmds, os.Args[1:]); err != nil {

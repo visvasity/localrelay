@@ -17,6 +17,7 @@ import (
 	"os"
 	"os/user"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -326,6 +327,98 @@ func (r *Relay) handleAddUser(req *AddRequest) (*AddResponse, error) {
 		return &AddResponse{Err: err.Error()}, nil
 	}
 	return &AddResponse{}, nil
+}
+
+// handleRemove deletes an explicit relay, or a per-user delegation when req.User
+// is set. It is the inverse of handleAdd.
+func (r *Relay) handleRemove(ctx context.Context, req *RemoveRequest) (*RemoveResponse, error) {
+	if req.User {
+		return r.handleRemoveUser(req)
+	}
+	if err := ValidName(req.Name); err != nil {
+		return &RemoveResponse{Err: err.Error()}, nil
+	}
+	if _, ok := r.relays.LoadAndDelete(req.Name); !ok {
+		return &RemoveResponse{Err: fmt.Sprintf("no relay named %q", req.Name)}, nil
+	}
+	r.targetMap.Delete(req.Name)
+	if err := r.saveRelays(); err != nil {
+		return &RemoveResponse{Err: err.Error()}, nil
+	}
+	return &RemoveResponse{}, nil
+}
+
+// handleRemoveUser deletes a per-user subdomain delegation.
+func (r *Relay) handleRemoveUser(req *RemoveRequest) (*RemoveResponse, error) {
+	if err := ValidName(req.Name); err != nil {
+		return &RemoveResponse{Err: err.Error()}, nil
+	}
+	if _, ok := r.users.LoadAndDelete(req.Name); !ok {
+		return &RemoveResponse{Err: fmt.Sprintf("no user delegation for %q", req.Name)}, nil
+	}
+	r.userProxyMap.Delete(req.Name)
+	if err := r.saveUsers(); err != nil {
+		return &RemoveResponse{Err: err.Error()}, nil
+	}
+	return &RemoveResponse{}, nil
+}
+
+// handleList returns all active relays sorted by name: explicit relays, per-user
+// delegations, and the automatic relays backed by <name>.sock files in the
+// sockets directory (excluding any shadowed by an explicit relay of the same
+// name).
+func (r *Relay) handleList(ctx context.Context, req *ListRequest) (*ListResponse, error) {
+	return &ListResponse{Entries: r.listEntries()}, nil
+}
+
+// listEntries returns all active relays sorted by name: explicit relays, per-user
+// delegations, and the automatic socket-directory relays. It backs both the list
+// control verb and the welcome page.
+func (r *Relay) listEntries() []ListEntry {
+	var entries []ListEntry
+	r.relays.Range(func(name string, info relayInfo) bool {
+		entries = append(entries, ListEntry{Name: name, Target: info.Target, Kind: KindRelay, CleanURL: info.CleanURL})
+		return true
+	})
+	r.users.Range(func(name string, info relayInfo) bool {
+		entries = append(entries, ListEntry{Name: name, Target: info.Target, Kind: KindUser, CleanURL: info.CleanURL})
+		return true
+	})
+	entries = append(entries, r.socketEntries()...)
+	sort.Slice(entries, func(i, j int) bool {
+		if entries[i].Name != entries[j].Name {
+			return entries[i].Name < entries[j].Name
+		}
+		return entries[i].Kind < entries[j].Kind
+	})
+	return entries
+}
+
+// socketEntries lists the automatic relays for <name>.sock files in the sockets
+// directory, skipping the control socket and any name shadowed by an explicit
+// relay (which takes precedence in routing).
+func (r *Relay) socketEntries() []ListEntry {
+	des, err := os.ReadDir(r.opts.SocketsDir)
+	if err != nil {
+		return nil
+	}
+	var entries []ListEntry
+	for _, de := range des {
+		name := strings.TrimSuffix(de.Name(), ".sock")
+		if name == de.Name() || name == ReservedName {
+			continue
+		}
+		if _, ok := r.relays.Load(name); ok {
+			continue
+		}
+		path := filepath.Join(r.opts.SocketsDir, de.Name())
+		fi, err := os.Stat(path)
+		if err != nil || fi.Mode()&fs.ModeSocket == 0 {
+			continue
+		}
+		entries = append(entries, ListEntry{Name: name, Target: path, Kind: KindSocket})
+	}
+	return entries
 }
 
 // checkSocketOwner verifies socketPath is a Unix socket owned by username. A
