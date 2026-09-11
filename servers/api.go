@@ -34,7 +34,7 @@ func ValidName(name string) error {
 }
 
 // AddPath is the control-channel endpoint for the add verb.
-const AddPath = "/add"
+const AddPath = "/api/add"
 
 // AddRequest registers an explicit relay <Name> -> <Target> with the daemon.
 // Target is an http/https URL: the scheme selects the backend hop's protocol
@@ -64,7 +64,7 @@ type AddResponse struct {
 }
 
 // RemovePath is the control-channel endpoint for the remove verb.
-const RemovePath = "/remove"
+const RemovePath = "/api/remove"
 
 // RemoveRequest removes an explicit relay named Name, or a per-user delegation
 // when User is set. It is the inverse of AddRequest.
@@ -80,7 +80,7 @@ type RemoveResponse struct {
 }
 
 // ListPath is the control-channel endpoint for the list verb.
-const ListPath = "/list"
+const ListPath = "/api/list"
 
 // ListRequest asks the daemon for all registered relays and user delegations.
 type ListRequest struct{}
