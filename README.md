@@ -4,13 +4,13 @@ A small reverse-proxy daemon that routes HTTP and HTTPS requests for
 `*.localhost` to other local services, with a built-in certificate authority
 that is name-constrained `localhost`.
 
-Root can configure the forwarding on port 80, 443 as:
+Root can configure forwarding on ports 80, 443 as:
 
     http://filer.localhost/index.html => http://127.0.0.1:8080/index.html
 
     https://tradebot.username.localhost/index.html => /home/username/tradebot.sock
 
-and non-root users also configure similar setup, but on unprivileged ports.
+and non-root users can also configure similar setup, but on unprivileged ports.
 
 **HTTPS** is enabled by pointing `-ca-dir` at a local CA; the daemon then mints
 a certificate for every `*.localhost` host on the fly, so all local names are
